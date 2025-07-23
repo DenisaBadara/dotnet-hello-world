@@ -1,0 +1,26 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nginx-denisa-deployment
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: denisa
+  template:
+    metadata:
+      labels:
+        app: denisa
+    spec:
+      containers:
+        - name: nginx-denisa
+          image: nginx:denisa
+          resources:
+            limits:
+              memory: "64Mi"
+              cpu: "250m"
+            requests:
+              memory: "32Mi"
+              cpu: "200m"
+          ports:
+            - containerPort: 80

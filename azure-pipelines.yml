@@ -1,0 +1,128 @@
+trigger:
+- main
+
+parameters:
+  - name: action
+    displayName: Terraform Action
+    type: string
+    default: apply
+    values:
+      - apply
+      - destroy
+
+variables:
+  dockerRegistryServiceConnection: 'SVC-ACR'
+  imageRepository: 'hello-world-api'
+  containerRegistry: 'cgkacademy2025.azurecr.io'
+  dockerfilePath: '$(Build.SourcesDirectory)/Dockerfile'
+  tag: 'latest' 
+  appName: 'denisa-webapp'
+
+stages:
+- stage: Terraform
+  displayName: Terraform Provisioning
+  jobs:
+    - job: TerraformJob
+      displayName: Run Terraform
+      pool:
+        vmImage: 'ubuntu-latest'
+      steps:
+        - checkout: self
+
+        - task: TerraformInstaller@1
+          inputs:
+            terraformVersion: 'latest'
+
+        - task: TerraformTaskV4@4
+          displayName: Terraform Init
+          inputs:
+            provider: 'azurerm'
+            command: 'init'
+            backendServiceArm: 'SVC-AzureDevops'
+            environmentServiceNameAzureRM: 'SVC-AzureDevops'
+            backendAzureRmResourceGroupName: 'Module-IAC'
+            backendAzureRmStorageAccountName: 'cgkacademy2025'
+            backendAzureRmContainerName: 'tf-state'
+            backendAzureRmKey: 'denisa-badara-v2.tfstate'
+
+        - task: TerraformTaskV4@4
+          displayName: Terraform Plan
+          inputs:
+            provider: 'azurerm'
+            command: 'plan'
+            backendServiceArm: 'SVC-AzureDevops'
+            environmentServiceNameAzureRM: 'SVC-AzureDevops'
+            backendAzureRmResourceGroupName: 'Module-IAC'
+            backendAzureRmStorageAccountName: 'cgkacademy2025'
+            backendAzureRmContainerName: 'tf-state'
+            backendAzureRmKey: 'denisa-badara-v2.tfstate'
+
+        - task: TerraformTaskV4@4
+          displayName: Terraform Apply
+          condition: and(succeeded(), eq('${{ parameters.action }}', 'apply'))
+          inputs:
+            provider: 'azurerm'
+            command: 'apply'
+            commandOptions: '-auto-approve'
+            backendServiceArm: 'SVC-AzureDevops'
+            environmentServiceNameAzureRM: 'SVC-AzureDevops'
+            backendAzureRmResourceGroupName: 'Module-IAC'
+            backendAzureRmStorageAccountName: 'cgkacademy2025'
+            backendAzureRmContainerName: 'tf-state'
+            backendAzureRmKey: 'denisa-badara-v2.tfstate'
+
+        - task: TerraformTaskV4@4
+          displayName: Terraform Destroy
+          condition: and(succeeded(), eq('${{ parameters.action }}', 'destroy'))
+          inputs:
+            provider: 'azurerm'
+            command: 'destroy'
+            commandOptions: '-auto-approve'
+            backendServiceArm: 'SVC-AzureDevops'
+            environmentServiceNameAzureRM: 'SVC-AzureDevops'
+            backendAzureRmResourceGroupName: 'Module-IAC'
+            backendAzureRmStorageAccountName: 'cgkacademy2025'
+            backendAzureRmContainerName: 'tf-state'
+            backendAzureRmKey: 'denisa-badara-v2.tfstate'
+
+- stage: BuildAndPushDocker
+  displayName: Build & Push Docker Image
+  dependsOn: Terraform
+  condition: succeeded()
+  jobs:
+    - job: DockerBuild
+      displayName: Build Docker Image & Push to ACR
+      pool:
+        vmImage: 'ubuntu-latest'
+      steps:
+        - checkout: self
+
+        - task: Docker@2
+          displayName: Build and push image to ACR
+          inputs:
+            command: buildAndPush
+            repository: $(imageRepository)
+            dockerfile: $(dockerfilePath)
+            containerRegistry: $(dockerRegistryServiceConnection)
+            tags: |
+              $(tag)
+
+- stage: Deploy
+  displayName: Deploy to Azure App Service
+  dependsOn: BuildAndPushDocker
+  condition: succeeded()
+  jobs:
+    - job: Deploy
+      displayName: Deploy to WebApp
+      pool:
+        vmImage: ubuntu-latest
+      steps: 
+        - task: AzureWebAppContainer@1
+          displayName: Deploy container to Azure App Service
+          inputs:
+            azureSubscription: 'SVC-AzureDevops'
+            appName: '$(appName)'
+            containers: '$(containerRegistry)/$(imageRepository):$(tag)'
+            imageSource: 'Azure Container Registry'
+            containerRegistryType: 'Azure Container Registry'
+            azureContainerRegistry: $(dockerRegistryServiceConnection)
